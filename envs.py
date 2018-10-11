@@ -134,7 +134,7 @@ class VecPyTorch(VecEnvWrapper):
 
     def reset(self):
         obs = self.venv.reset()
-        obs = torch.from_numpy(obs).float().to(self.device)
+        obs = torch.from_numpy(np.array(obs)).float().to(self.device)
         return obs
 
     def step_async(self, actions):
