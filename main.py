@@ -83,8 +83,8 @@ class TorchRunner(L2RunEnv):
         knee_min = -1.13
         hip_max = 0.087
         hip_min = -0.698
-        trunk_min = -0.349
-        trunk_max = 0.349
+        trunk_min = -0.087
+        trunk_max = 0.087
 
         joint_punishment += self.gen_penalty(joints['ankle_r'], ankle_min, ankle_max)
         joint_punishment += self.gen_penalty(joints['ankle_l'], ankle_min, ankle_max)
@@ -95,10 +95,11 @@ class TorchRunner(L2RunEnv):
         joint_punishment += self.gen_penalty(joints['hip_r'], hip_min, hip_max)
         joint_punishment += self.gen_penalty(joints['hip_l'], hip_min, hip_max)
 
-        joint_punishment += self.gen_penalty(joints['back'], trunk_min, trunk_max)
+        joint_punishment += self.gen_penalty(joints['ground_pelvis'][0:1], trunk_min, trunk_max, multiplier=0.1)
+        # print("GP: ", joints['ground_pelvis'])
 
         print("Joint Punishment is: ", joint_punishment)
-        print(joints)
+        reward = 10*reward
         print("non-punished reward is: ", reward)
         reward = reward - joint_punishment
         print("Total", reward)
@@ -239,7 +240,7 @@ def main():
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
         print("update time", print(len(episode_rewards)))
-        if True and len(episode_rewards) > 1:
+        if True and len(episode_rewards) >= 10:
             end = time.time()
             print("Updates {}, num timesteps {}, FPS {} \n Last {} training episodes: mean/median reward {:.5f}/{:.5f}, min/max reward {:.5f}/{:.5f}\n".
                 format(j, total_num_steps,
@@ -252,10 +253,11 @@ def main():
                        value_loss, action_loss))
 
             import time
-            line1.set_xdata(np.arange(0, len(episode_rewards)))
-            line1.set_ydata(episode_rewards)
-            ax.set_xlim(0, len(episode_rewards))
-            ax.set_ylim(min(episode_rewards), max(episode_rewards))
+            xdata = np.convolve(episode_rewards, np.ones(10)/10, mode='valid')
+            line1.set_xdata(np.arange(0, len(xdata)))
+            line1.set_ydata(xdata)
+            ax.set_xlim(0, len(xdata))
+            ax.set_ylim(min(xdata), max(xdata))
             fig.canvas.draw()
             fig.canvas.flush_events()
             time.sleep(0.01)
