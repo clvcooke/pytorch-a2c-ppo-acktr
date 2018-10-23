@@ -11,6 +11,7 @@ class Flatten(nn.Module):
         return x.view(x.size(0), -1)
 
 
+
 class Policy(nn.Module):
     def __init__(self, obs_shape, action_space, base_kwargs=None):
         super(Policy, self).__init__()
@@ -75,11 +76,12 @@ class Policy(nn.Module):
 
 class NNBase(nn.Module):
 
-    def __init__(self, recurrent, recurrent_input_size, hidden_size):
+    def __init__(self, recurrent, recurrent_input_size, hidden_size, synergies =5):
         super(NNBase, self).__init__()
 
         self._hidden_size = hidden_size
         self._recurrent = recurrent
+        self.synergies = synergies
 
         if recurrent:
             self.gru = nn.GRUCell(recurrent_input_size, hidden_size)
@@ -101,6 +103,10 @@ class NNBase(nn.Module):
     @property
     def output_size(self):
         return self._hidden_size
+
+    @@property
+    def synergies(self):
+        return self.synergies
 
     def _forward_gru(self, x, hxs, masks):
         if x.size(0) == hxs.size(0):

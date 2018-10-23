@@ -53,11 +53,12 @@ except OSError:
         os.remove(f)
 
 class TorchRunner(L2RunEnv):
-    def __init__(self, visualize=True, acc=0.005):
-        super(TorchRunner, self).__init__(visualize, acc)
+    def __init__(self, visualize=True, acc=0.015):
+        super(TorchRunner, self).__init__(True, acc)
 
     def reset(self, project = True):
         obs = super(TorchRunner, self).reset()
+
         return torch.from_numpy(np.array(obs))
 
     def gen_penalty(self, pos, min_val, max_val, multiplier=0.01):
@@ -70,41 +71,101 @@ class TorchRunner(L2RunEnv):
         else:
             return multiplier*abs(max_val - pos)
 
+    @staticmethod
+    def get_ground_state(body_pos):
+        """
+        :return: ON/OFF of each heel and toe (r/l)
+        """
+        ground_state = {
+            "calcn_r": False,
+            "calcn_l": False,
+            "toes_r": False,
+            "toes_l": False
+        }
+        for key in ground_state.keys():
+            # TODO: fix
+            if body_pos[key][1] < 0.01:
+                ground_state[key] = True
+
+        return ground_state
+
     def step(self, action, project = True):
         action = action.squeeze().cpu().numpy()
-        obs, reward, done, info =  super(TorchRunner, self).step(action)
+        total_reward = 0
+        for i in range(1):
+            obs, reward, done, info =  super(TorchRunner, self).step(action)
 
-        # lets check if the joints are within their range
-        joints = self.osim_model.state_desc['joint_pos']
-        joint_punishment = 0
-        ankle_min = -0.52
-        ankle_max = 0.26
-        knee_max = 0.174
-        knee_min = -1.13
-        hip_max = 0.087
-        hip_min = -0.698
-        trunk_min = -0.087
-        trunk_max = 0.087
+            GOAL_STATE = 'terminal_stance'
 
-        joint_punishment += self.gen_penalty(joints['ankle_r'], ankle_min, ankle_max)
-        joint_punishment += self.gen_penalty(joints['ankle_l'], ankle_min, ankle_max)
+            # lets check if the joints are within their range
+            joint_pos = self.osim_model.state_desc['joint_pos']
+            joint_vel = self.osim_model.state_desc['joint_vel']
+            joint_acc = self.osim_model.state_desc['joint_acc']
+            body_pos = self.osim_model.state_desc['body_pos']
+            #
+            # pose_reward = 0
+            # # rewarding progress towards goal state (fixed for now to be terminal stance):
+            # ground_state = self.get_ground_state(body_pos)
+            #
+            # # heels and toes
+            # if not ground_state['toes_l']:
+            #     pose_reward += 1
+            # if ground_state['toes_r']:
+            #     pose_reward += 1
+            # if ground_state['calcn_l']:
+            #     pose_reward += 1
+            # if not ground_state['calcn_r']:
+            #     pose_reward += 1
+            #
+            # r = self.gen_penalty(joint_pos['knee_r'], -0.1, 0.1, 1)
+            # pose_reward += 1 - r
+            #
+            # r = self.gen_penalty(joint_pos['knee_l'], -0.1, 0.1, 1)
+            # pose_reward += 1 - r
+            #
+            # r = self.gen_penalty(joint_pos['hip_r'], -0.3, -0.2, 1)
+            # pose_reward += 1 - r
+            #
+            # r = self.gen_penalty(joint_pos['hip_l'], 0.2, 0.3, 1)
+            # pose_reward += 1 - r
+            #
+            # pose_reward = pose_reward/10
+            # print("POSE REWARD IS: ", pose_reward)
 
-        joint_punishment += self.gen_penalty(joints['knee_l'], knee_min, knee_max)
-        joint_punishment += self.gen_penalty(joints['knee_r'], knee_min, knee_max)
+            joint_punishment = 0
+            ankle_min = -0.52
+            ankle_max = 0.26
+            knee_max = 0.174
+            knee_min = -1.13
+            hip_max = 0.087
+            hip_min = -0.698
+            trunk_min = -0.087
+            trunk_max = 0.087
 
-        joint_punishment += self.gen_penalty(joints['hip_r'], hip_min, hip_max)
-        joint_punishment += self.gen_penalty(joints['hip_l'], hip_min, hip_max)
+            # joint_punishment += self.gen_penalty(joint_pos['ankle_r'], ankle_min, ankle_max)
+            # joint_punishment += self.gen_penalty(joint_pos['ankle_l'], ankle_min, ankle_max)
+            #
+            # joint_punishment += self.gen_penalty(joint_pos['knee_l'], knee_min, knee_max)
+            # joint_punishment += self.gen_penalty(joint_pos['knee_r'], knee_min, knee_max)
+            #
+            # joint_punishment += self.gen_penalty(joint_pos['hip_r'], hip_min, hip_max)
+            # joint_punishment += self.gen_penalty(joint_pos['hip_l'], hip_min, hip_max)
 
-        joint_punishment += self.gen_penalty(joints['ground_pelvis'][0:1], trunk_min, trunk_max, multiplier=0.1)
-        # print("GP: ", joints['ground_pelvis'])
+            joint_punishment += self.gen_penalty(joint_pos['ground_pelvis'][0:1], trunk_min, trunk_max, multiplier=0.1)
+            # joint_punishment = 0
+            # print("GP: ", joints['ground_pelvis'])
+            pelvis_height = body_pos['pelvis'][1]
 
-        print("Joint Punishment is: ", joint_punishment)
-        reward = 10*reward
-        print("non-punished reward is: ", reward)
-        reward = reward - joint_punishment
-        print("Total", reward)
+            print("Joint Punishment is: ", joint_punishment)
+            reward = 0
+            reward += pelvis_height/10
+            print("non-punished reward is: ", reward)
+            reward = reward - joint_punishment
+            print("Total", reward)
+            total_reward += reward
 
-        return torch.from_numpy(np.expand_dims(np.array(obs), 0)), torch.from_numpy(np.expand_dims(np.array(reward), 0)), [done], [info]
+
+        return torch.from_numpy(np.expand_dims(np.array(obs), 0)), torch.from_numpy(np.expand_dims(np.array(total_reward), 0)), [done], [info]
 
 
 def main():
@@ -151,6 +212,11 @@ def main():
     #
     actor_critic = Policy(ob_shape, envs.action_space,
         base_kwargs={'recurrent': args.recurrent_policy})
+
+    # try to load the previous policy
+    data = torch.load(r"C:\Users\clvco\URA_F18\pytorch-a2c-ppo-acktr\trained_models\ppo\skeleskip2.pt")
+    # print(data)
+    actor_critic.load_state_dict(data[0].state_dict())
     actor_critic.to(device)
 
     if args.algo == 'a2c':
