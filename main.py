@@ -53,7 +53,7 @@ except OSError:
         os.remove(f)
 
 class TorchRunner(L2RunEnv):
-    def __init__(self, visualize=True, acc=0.015):
+    def __init__(self, visualize=True, acc=0.03):
         super(TorchRunner, self).__init__(True, acc)
 
     def reset(self, project = True):
@@ -157,7 +157,8 @@ class TorchRunner(L2RunEnv):
             pelvis_height = body_pos['pelvis'][1]
 
             print("Joint Punishment is: ", joint_punishment)
-            reward = 0
+            reward *= 10
+            print("Fwd reward is: ", reward)
             reward += pelvis_height/10
             print("non-punished reward is: ", reward)
             reward = reward - joint_punishment
@@ -214,7 +215,7 @@ def main():
         base_kwargs={'recurrent': args.recurrent_policy})
 
     # try to load the previous policy
-    data = torch.load(r"C:\Users\clvco\URA_F18\pytorch-a2c-ppo-acktr\trained_models\ppo\skeleskip2.pt")
+    data = torch.load(r"C:\Users\clvco\URA_F18\pytorch-a2c-ppo-acktr\trained_models\ppo\skelefactor_walk.pt")
     # print(data)
     actor_critic.load_state_dict(data[0].state_dict())
     actor_critic.to(device)

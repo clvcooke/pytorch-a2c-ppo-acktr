@@ -102,7 +102,3 @@ venv.bak/
 
 trained_models/
 .fuse_hidden*
-
-python_1/
-
-*.png
