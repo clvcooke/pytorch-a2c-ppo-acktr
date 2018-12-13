@@ -46,6 +46,38 @@ class Categorical(nn.Module):
         return FixedCategorical(logits=x)
 
 
+class MonteGaussian(nn.Module):
+    def __init__(self, num_inputs, num_outputs):
+        super(MonteGaussian, self).__init__()
+
+        init_ = lambda m: init(m, init_normc_,
+                               lambda x: nn.init.constant_(x,0))
+        self.fc_mean = init_(nn.Linear(num_inputs, num_outputs, bias=False))
+        self.logstd = AddBias(torch.zeros(num_inputs))
+
+    def forward(self, x):
+        zeros = torch.zeros(x.size())
+        hack = torch.zeros((10000))
+        if x.is_cuda:
+            zeros = zeros.cuda()
+            hack = hack.cuda()
+        action_logstd = self.logstd(zeros)
+
+        normy = FixedNormal(x, action_logstd.exp())
+
+        import scipy.stats as stats
+
+        action_mean = self.fc_mean(normy.sample())
+        samples = self.fc_mean(normy.sample(hack.size()))
+        import numpy as np
+        liklihoods = np.zeros((samples.shape[1]))
+        for i in range(samples.shape[1]):
+            gkde = stats.gaussian_kde(samples[:,i,:].detach().cpu().numpy().flatten())
+            liklihood = gkde.logpdf(action_mean[i,0].detach().cpu().numpy())
+            liklihoods[i] = liklihood
+        liklihood = torch.from_numpy(liklihoods).float().cuda()
+        return action_mean.view(-1,1), liklihood
+
 class DiagGaussian(nn.Module):
     def __init__(self, num_inputs, num_outputs):
         super(DiagGaussian, self).__init__()
@@ -54,8 +86,9 @@ class DiagGaussian(nn.Module):
               init_normc_,
               lambda x: nn.init.constant_(x, 0))
 
-        self.fc_mean = init_(nn.Linear(num_inputs, num_outputs))
+        self.fc_mean = init_(nn.Linear(num_inputs, num_outputs, bias=False))
         self.logstd = AddBias(torch.zeros(num_outputs))
+
 
     def forward(self, x):
         action_mean = self.fc_mean(x)

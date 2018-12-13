@@ -101,7 +101,7 @@ class NNBase(nn.Module):
     @property
     def output_size(self):
         # return self._hidden_size
-        return 5
+        return 7
 
     def _forward_gru(self, x, hxs, masks):
         if x.size(0) == hxs.size(0):
@@ -183,10 +183,12 @@ class MLPBase(NNBase):
         self.actor = nn.Sequential(
             init_(nn.Linear(num_inputs, hidden_size)),
             nn.Tanh(),
+            # nn.Dropout(0.2),
             init_(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
-            init_(nn.Linear(hidden_size, 5)),
-            nn.Tanh()
+            # nn.Dropout(0.2),
+            init_(nn.Linear(hidden_size, 7, bias=False)),
+            nn.Sigmoid()
         )
 
         self.critic = nn.Sequential(

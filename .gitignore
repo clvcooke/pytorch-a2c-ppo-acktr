@@ -104,3 +104,7 @@ trained_models/
 .fuse_hidden*
 
 *.png
+
+*.npy
+
+*.json

@@ -11,6 +11,7 @@ from collections import deque
 import gym
 import numpy as np
 import torch
+import json
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -23,6 +24,7 @@ from storage import RolloutStorage
 from utils import get_vec_normalize
 from visualize import visdom_plot
 from osim.env import L2RunEnv
+
 args = get_args()
 
 assert args.algo in ['a2c', 'ppo', 'acktr']
@@ -34,7 +36,7 @@ num_updates = int(args.num_frames) // args.num_steps // args.num_processes
 
 torch.manual_seed(args.seed)
 if args.cuda:
-    torch.cuda.manual_seed(args.seed+1)
+    torch.cuda.manual_seed(args.seed + 1)
 
 try:
     os.makedirs(args.log_dir)
@@ -52,13 +54,31 @@ except OSError:
     for f in files:
         os.remove(f)
 
+
 class TorchRunner(L2RunEnv):
     def __init__(self, visualize=True, acc=0.03):
         super(TorchRunner, self).__init__(True, acc)
+        self.internal_time = 0.0
+        self.cycle = 0.0
+        self.joints = ['LHF',
+                       "LKF",
+                       'LAP',
+                       'RHF',
+                       'RKF',
+                       'RAP']
+        self.sim_joints_map = {'trunk': 'back',
+                               'LHF': 'hip_l',
+                               'LKF': 'knee_l',
+                               'LAP': 'ankle_l',
+                               'RHF': 'hip_r',
+                               'RKF': 'knee_r',
+                               "RAP": 'ankle_r'}
+        with open('movement_data.json') as fp:
+            self.joint_data = json.load(fp)
 
-    def reset(self, project = True):
+    def reset(self, project=True):
         obs = super(TorchRunner, self).reset()
-
+        self.internal_time = 0.0
         return torch.from_numpy(np.array(obs))
 
     def gen_penalty(self, pos, min_val, max_val, multiplier=0.01):
@@ -67,9 +87,9 @@ class TorchRunner(L2RunEnv):
         if min_val <= pos <= max_val:
             return 0
         elif pos <= min_val:
-            return multiplier*abs(pos - min_val)
+            return multiplier * abs(pos - min_val)
         else:
-            return multiplier*abs(max_val - pos)
+            return multiplier * abs(max_val - pos)
 
     @staticmethod
     def get_ground_state(body_pos):
@@ -89,11 +109,30 @@ class TorchRunner(L2RunEnv):
 
         return ground_state
 
-    def step(self, action, project = True):
+    def calculate_cycle(self):
+        self.internal_time += 1.0 / 100
+        if self.internal_time < 4.63:
+            self.cycle = self.internal_time / 4.63
+        else:
+            self.cycle = (self.internal_time - 4.63) / 1.96 % 1
+
+    def get_goal_angles(self):
+        goal_angs = {'trunk': 0.0}
+        if self.internal_time < 4.63:
+            idx = int(self.internal_time * 100)
+        else:
+            idx = int(((self.internal_time - 4.63) % 1.96) * 100) + int(4.63 * 100)
+        for joint in self.joints:
+            goal_angs[joint] = self.joint_data[joint][idx]
+        return goal_angs
+
+    def step(self, action, project=True):
         action = action.squeeze().cpu().numpy()
         total_reward = 0
         for i in range(1):
-            obs, reward, done, info =  super(TorchRunner, self).step(action)
+            self.calculate_cycle()
+
+            obs, reward, done, info = super(TorchRunner, self).step(action)
 
             GOAL_STATE = 'terminal_stance'
 
@@ -136,41 +175,68 @@ class TorchRunner(L2RunEnv):
             ankle_min = -0.52
             ankle_max = 0.26
             knee_max = 0.174
+            knee_max = 0
             knee_min = -1.13
             hip_max = 0.087
             hip_min = -0.698
             trunk_min = -0.087
             trunk_max = 0.087
 
+            goal_angles = self.get_goal_angles()
+            for joint_name, joint_value in goal_angles.items():
+                print(joint_name)
+                try:
+                    joint_value = joint_value[0]
+                except TypeError:
+                    pass
+                print(joint_value)
+                joint_punishment += self.gen_penalty(joint_pos[self.sim_joints_map[joint_name]],
+                                                     joint_value, joint_value)
+
             # joint_punishment += self.gen_penalty(joint_pos['ankle_r'], ankle_min, ankle_max)
             # joint_punishment += self.gen_penalty(joint_pos['ankle_l'], ankle_min, ankle_max)
-            #
-            # joint_punishment += self.gen_penalty(joint_pos['knee_l'], knee_min, knee_max)
-            # joint_punishment += self.gen_penalty(joint_pos['knee_r'], knee_min, knee_max)
-            #
+
+            joint_punishment += self.gen_penalty(joint_pos['knee_l'], knee_min, knee_max, multiplier=0.001)
+            joint_punishment += self.gen_penalty(joint_pos['knee_r'], knee_min, knee_max, multiplier=0.001)
+
             # joint_punishment += self.gen_penalty(joint_pos['hip_r'], hip_min, hip_max)
             # joint_punishment += self.gen_penalty(joint_pos['hip_l'], hip_min, hip_max)
-
-            joint_punishment += self.gen_penalty(joint_pos['ground_pelvis'][0:1], trunk_min, trunk_max, multiplier=0.1)
+            #
+            # joint_punishment += self.gen_penalty(joint_pos['ground_pelvis'][0:1], trunk_min, trunk_max, multiplier=0.1)
             # joint_punishment = 0
             # print("GP: ", joints['ground_pelvis'])
-            pelvis_height = body_pos['pelvis'][1]
+            # pelvis_height = min(0.8, body_pos['pelvis'][1])
 
-            print("Joint Punishment is: ", joint_punishment)
-            reward *= 10
-            print("Fwd reward is: ", reward)
-            reward += pelvis_height/10
-            print("non-punished reward is: ", reward)
-            reward = reward - joint_punishment
-            print("Total", reward)
+            # print("pelvis", pelvis_height)
+
+            # print("Joint Punishment is: ", joint_punishment)
+            # reward *= 10
+            reward = 0
+            # print("Fwd reward is: ", reward)
+            # reward += pelvis_height / 10
+            # print("non-punished reward is: ", reward)
+            reward = reward - joint_punishment * 20
+            # print("Total", reward)
             total_reward += reward
 
+        return torch.from_numpy(np.expand_dims(np.array(obs), 0)), torch.from_numpy(
+            np.expand_dims(np.array(total_reward), 0)), [done], [info]
 
-        return torch.from_numpy(np.expand_dims(np.array(obs), 0)), torch.from_numpy(np.expand_dims(np.array(total_reward), 0)), [done], [info]
 
+import torch.multiprocessing as mp
+
+
+def envwild():
+    # each environment gets its own subprocess and the step happens asyncrhounously
+    # we rotate through each environment
+    pass
+
+
+class VectorRunner(TorchRunner):
+    def __init__(self):
+        super().__init__()
 
 def main():
-
     import matplotlib.pyplot as plt
     # figure = plt.figure()
     # plt.ion()
@@ -192,13 +258,11 @@ def main():
     fig = plt.figure()
     ax = fig.add_subplot(111)
     import time
-    line1, = ax.plot([0,1,2], [0,1,1], 'r-')  # Returns a tuple of line objects, thus the comma
+    line1, = ax.plot([0, 1, 2], [0, 1, 1], 'r-')  # Returns a tuple of line objects, thus the comma
     time.sleep(0.01)
 
-
-
     torch.set_num_threads(1)
-    args.num_processes =1
+    args.num_processes = 1
     device = torch.device("cuda:0" if args.cuda else "cpu")
 
     if args.vis:
@@ -212,10 +276,11 @@ def main():
     #                     args.gamma, args.log_dir, args.add_timestep, device, False)
     #
     actor_critic = Policy(ob_shape, envs.action_space,
-        base_kwargs={'recurrent': args.recurrent_policy})
+                          base_kwargs={'recurrent': args.recurrent_policy})
 
     # try to load the previous policy
-    data = torch.load(r"C:\Users\clvco\URA_F18\pytorch-a2c-ppo-acktr\trained_models\ppo\skelefactor_walk.pt")
+    data = torch.load(
+        r"C:\Users\clvco\URA_F18\pytorch-a2c-ppo-acktr\trained_models\ppo\skelefactor_walk_good_bio_positive_enforcement_7fact.pt")
     # print(data)
     actor_critic.load_state_dict(data[0].state_dict())
     actor_critic.to(device)
@@ -228,16 +293,16 @@ def main():
     elif args.algo == 'ppo':
         agent = algo.PPO(actor_critic, args.clip_param, args.ppo_epoch, args.num_mini_batch,
                          args.value_loss_coef, args.entropy_coef, lr=args.lr,
-                               eps=args.eps,
-                               max_grad_norm=args.max_grad_norm)
+                         eps=args.eps,
+                         max_grad_norm=args.max_grad_norm)
     elif args.algo == 'acktr':
         agent = algo.A2C_ACKTR(actor_critic, args.value_loss_coef,
                                args.entropy_coef, acktr=True)
     obs = envs.reset()
     ob_shape = obs.shape
     rollouts = RolloutStorage(args.num_steps, args.num_processes,
-                        ob_shape, envs.action_space,
-                        actor_critic.recurrent_hidden_state_size)
+                              ob_shape, envs.action_space,
+                              actor_critic.recurrent_hidden_state_size)
     print(args.num_processes)
     print(envs.observation_space.shape)
     print(obs.shape)
@@ -255,9 +320,9 @@ def main():
             # Sample actions
             with torch.no_grad():
                 value, action, action_log_prob, recurrent_hidden_states = actor_critic.act(
-                        rollouts.obs[step],
-                        rollouts.recurrent_hidden_states[step],
-                        rollouts.masks[step])
+                    rollouts.obs[step],
+                    rollouts.recurrent_hidden_states[step],
+                    rollouts.masks[step])
 
             # Obser reward and next obs
             obs, reward, done, infos = envs.step(action)
@@ -274,7 +339,6 @@ def main():
                 episode_rewards.append(ep_reward)
                 ep_reward = 0
             rollouts.insert(obs, recurrent_hidden_states, action, action_log_prob, value, reward, masks)
-
 
         with torch.no_grad():
             next_value = actor_critic.get_value(rollouts.obs[-1],
@@ -309,7 +373,8 @@ def main():
         print("update time", print(len(episode_rewards)))
         if True and len(episode_rewards) >= 10:
             end = time.time()
-            print("Updates {}, num timesteps {}, FPS {} \n Last {} training episodes: mean/median reward {:.5f}/{:.5f}, min/max reward {:.5f}/{:.5f}\n".
+            print(
+                "Updates {}, num timesteps {}, FPS {} \n Last {} training episodes: mean/median reward {:.5f}/{:.5f}, min/max reward {:.5f}/{:.5f}\n".
                 format(j, total_num_steps,
                        int(total_num_steps / (end - start)),
                        len(episode_rewards),
@@ -320,7 +385,7 @@ def main():
                        value_loss, action_loss))
 
             import time
-            xdata = np.convolve(episode_rewards, np.ones(10)/10, mode='valid')
+            xdata = np.convolve(episode_rewards, np.ones(10) / 10, mode='valid')
             line1.set_xdata(np.arange(0, len(xdata)))
             line1.set_ydata(xdata)
             ax.set_xlim(0, len(xdata))
@@ -328,6 +393,9 @@ def main():
             fig.canvas.draw()
             fig.canvas.flush_events()
             time.sleep(0.01)
+            # save the returns
+            ret_path = 'returns/' + args.env_name + str(time.time()) + '.npy'
+            np.save(ret_path, np.array(np.array(xdata)))
             # plt.plot(range(len(episode_rewards)), episode_rewards)
 
         if (args.eval_interval is not None
@@ -346,7 +414,7 @@ def main():
 
             obs = eval_envs.reset()
             eval_recurrent_hidden_states = torch.zeros(args.num_processes,
-                            actor_critic.recurrent_hidden_state_size, device=device)
+                                                       actor_critic.recurrent_hidden_state_size, device=device)
             eval_masks = torch.zeros(args.num_processes, 1, device=device)
 
             while len(eval_episode_rewards) < 10:
@@ -366,8 +434,8 @@ def main():
             eval_envs.close()
 
             print(" Evaluation using {} episodes: mean reward {:.5f}\n".
-                format(len(eval_episode_rewards),
-                       np.mean(eval_episode_rewards)))
+                  format(len(eval_episode_rewards),
+                         np.mean(eval_episode_rewards)))
 
         if args.vis and j % args.vis_interval == 0:
             try:

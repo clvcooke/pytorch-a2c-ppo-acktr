@@ -64,10 +64,14 @@ def make_env(env_id, seed, rank, log_dir, add_timestep, allow_early_resets):
 
     return _thunk
 
-def make_vec_envs(env_name, seed, num_processes, gamma, log_dir, add_timestep,
+
+
+def make_vec_envs(fn, seed, num_processes, gamma, log_dir, add_timestep,
                   device, allow_early_resets, num_frame_stack=None):
-    envs = [make_env(env_name, seed, i, log_dir, add_timestep, allow_early_resets)
-            for i in range(num_processes)]
+
+    envs =[fn(seed) for i in range(num_processes)]
+    # envs = [make_env(env_name, seed, i, log_dir, add_timestep, allow_early_resets)
+    #         for i in range(num_processes)]
 
     if len(envs) > 1:
         envs = SubprocVecEnv(envs)

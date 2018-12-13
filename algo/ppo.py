@@ -79,6 +79,11 @@ class PPO():
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(),
                                          self.max_grad_norm)
                 self.optimizer.step()
+                # get the weights in the DIST fc_mean layer and clamp
+                fc_mean_weight = self.actor_critic.state_dict()['dist.fc_mean.weight']
+                fc_mean_weight.clamp_(0)
+                # TODO: set as constant
+                fc_mean_weight.masked_fill_(fc_mean_weight == 0, 0.01)
 
                 value_loss_epoch += value_loss.item()
                 action_loss_epoch += action_loss.item()
