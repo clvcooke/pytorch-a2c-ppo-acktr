@@ -108,3 +108,5 @@ trained_models/
 *.npy
 
 *.json
+
+\.idea/
