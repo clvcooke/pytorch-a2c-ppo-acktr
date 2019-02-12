@@ -5,28 +5,18 @@ import matplotlib
 import copy
 import glob
 import os
-import time
-from collections import deque
 
-import gym
 import numpy as np
 import torch
 import json
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
 
 import algo
 from arguments import get_args
-from envs import make_vec_envs
 from model import Policy
 from storage import RolloutStorage
-from utils import get_vec_normalize
-from visualize import visdom_plot
 from osim.env import L2RunEnv
 
 args = get_args()
-# input('wait')
 assert args.algo in ['a2c', 'ppo', 'acktr']
 if args.recurrent_policy:
     assert args.algo in ['a2c', 'ppo'], \
@@ -325,7 +315,7 @@ def main():
     timestep = 0
     ep_ends = []
     for j in range(num_updates):
-        if j == 25:
+        if j == 50:
             print("UPDATING SYNERGY")
             actor_critic.adjust_synergy(0.8)
         for step in tqdm.tqdm(range(args.num_steps)):
@@ -378,8 +368,7 @@ def main():
             if args.cuda:
                 save_model = copy.deepcopy(actor_critic).cpu()
 
-            save_model = [save_model,
-                          getattr(get_vec_normalize(envs), 'ob_rms', None)]
+            save_model = [save_model]
             print("Saving model")
             torch.save(save_model, os.path.join(save_path, args.env_name + ".pt"))
             print("Saved model to: ", os.path.join(save_path, args.env_name + ".pt"))
@@ -416,24 +405,24 @@ def main():
             np.save(ep_path, ep_ends)
             # plt.plot(range(len(episode_rewards)), episode_rewards)
 
-        if (args.eval_interval is not None
-                and len(episode_rewards) > 1
-                and j % args.eval_interval == 0):
-            eval_envs = make_vec_envs(
-                args.env_name, args.seed + args.num_processes, args.num_processes,
-                args.gamma, eval_log_dir, args.add_timestep, device, True)
+        # if (args.eval_interval is not None
+        #         and len(episode_rewards) > 1
+        #         and j % args.eval_interval == 0):
+            # eval_envs = make_vec_envs(
+            #     args.env_name, args.seed + args.num_processes, args.num_processes,
+            #     args.gamma, eval_log_dir, args.add_timestep, device, True)
 
-            vec_norm = get_vec_normalize(eval_envs)
-            if vec_norm is not None:
-                vec_norm.eval()
-                vec_norm.ob_rms = get_vec_normalize(envs).ob_rms
-
-            eval_episode_rewards = []
-
-            obs = eval_envs.reset()
-            eval_recurrent_hidden_states = torch.zeros(args.num_processes,
-                                                       actor_critic.recurrent_hidden_state_size, device=device)
-            eval_masks = torch.zeros(args.num_processes, 1, device=device)
+            # vec_norm = get_vec_normalize(eval_envs)
+            # if vec_norm is not None:
+            #     vec_norm.eval()
+            #     vec_norm.ob_rms = get_vec_normalize(envs).ob_rms
+            #
+            # eval_episode_rewards = []
+            #
+            # obs = eval_envs.reset()
+            # eval_recurrent_hidden_states = torch.zeros(args.num_processes,
+            #                                            actor_critic.recurrent_hidden_state_size, device=device)
+            # eval_masks = torch.zeros(args.num_processes, 1, device=device)
 
             # while len(eval_episode_rewards) < 10:
             #     with torch.no_grad():
