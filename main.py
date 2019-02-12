@@ -26,14 +26,14 @@ from visualize import visdom_plot
 from osim.env import L2RunEnv
 
 args = get_args()
-
+# input('wait')
 assert args.algo in ['a2c', 'ppo', 'acktr']
 if args.recurrent_policy:
     assert args.algo in ['a2c', 'ppo'], \
         'Recurrent policy is not implemented for ACKTR'
 
-num_updates = int(args.num_frames) // args.num_steps // args.num_processes
-
+num_updates = int(args.num_frames / args.num_steps / args.num_processes)
+print("NUM", num_updates)
 torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed + 1)
@@ -57,7 +57,7 @@ except OSError:
 
 class TorchRunner(L2RunEnv):
     def __init__(self, visualize=True, acc=0.03):
-        super(TorchRunner, self).__init__(True, acc)
+        super(TorchRunner, self).__init__(False, acc)
         self.internal_time = 0.0
         self.cycle = 0.0
         self.joints = ['LHF',
@@ -141,6 +141,7 @@ class TorchRunner(L2RunEnv):
             joint_vel = self.osim_model.state_desc['joint_vel']
             joint_acc = self.osim_model.state_desc['joint_acc']
             body_pos = self.osim_model.state_desc['body_pos']
+            muscles = self.osim_model.state_desc['muscles']
             #
             # pose_reward = 0
             # # rewarding progress towards goal state (fixed for now to be terminal stance):
@@ -184,12 +185,12 @@ class TorchRunner(L2RunEnv):
 
             goal_angles = self.get_goal_angles()
             for joint_name, joint_value in goal_angles.items():
-                print(joint_name)
+                # print(joint_name)
                 try:
                     joint_value = joint_value[0]
                 except TypeError:
                     pass
-                print(joint_value)
+                # print(joint_value)
                 joint_punishment += self.gen_penalty(joint_pos[self.sim_joints_map[joint_name]],
                                                      joint_value, joint_value)
 
@@ -205,17 +206,21 @@ class TorchRunner(L2RunEnv):
             # joint_punishment += self.gen_penalty(joint_pos['ground_pelvis'][0:1], trunk_min, trunk_max, multiplier=0.1)
             # joint_punishment = 0
             # print("GP: ", joints['ground_pelvis'])
-            # pelvis_height = min(0.8, body_pos['pelvis'][1])
+            pelvis_height = min(0.8, body_pos['pelvis'][1])
+
+            activation_punishment = 0
+            for muscle_names, muscle in muscles.items():
+                activation_punishment += muscle['activation']/(180*8)
 
             # print("pelvis", pelvis_height)
 
             # print("Joint Punishment is: ", joint_punishment)
             # reward *= 10
-            reward = 0
+            reward = - activation_punishment
             # print("Fwd reward is: ", reward)
-            # reward += pelvis_height / 10
+            reward += pelvis_height / 10
             # print("non-punished reward is: ", reward)
-            reward = reward - joint_punishment * 20
+            reward = reward - joint_punishment
             # print("Total", reward)
             total_reward += reward
 
@@ -235,7 +240,6 @@ def envwild():
 class VectorRunner(TorchRunner):
     def __init__(self):
         super().__init__()
-
 def main():
     import matplotlib.pyplot as plt
     # figure = plt.figure()
@@ -263,14 +267,15 @@ def main():
 
     torch.set_num_threads(1)
     args.num_processes = 1
-    device = torch.device("cuda:0" if args.cuda else "cpu")
+    # device = torch.device("cuda:0" if args.cuda else "cpu")
+    device = torch.device("cpu")
 
     if args.vis:
         from visdom import Visdom
         viz = Visdom(port=args.port)
         win = None
 
-    envs = TorchRunner(visualize=True, acc=0.005)
+    envs = TorchRunner(visualize=False, acc=0.005)
     ob_shape = envs.reset().shape
     # envs = make_vec_envs(args.env_name, args.seed, args.num_processes,
     #                     args.gamma, args.log_dir, args.add_timestep, device, False)
@@ -279,10 +284,10 @@ def main():
                           base_kwargs={'recurrent': args.recurrent_policy})
 
     # try to load the previous policy
-    data = torch.load(
-        r"C:\Users\clvco\URA_F18\pytorch-a2c-ppo-acktr\trained_models\ppo\skelefactor_walk_good_bio_positive_enforcement_7fact.pt")
-    # print(data)
-    actor_critic.load_state_dict(data[0].state_dict())
+    # data = torch.load(
+    #     r"C:\Users\clvco\URA_F18\pytorch-a2c-ppo-acktr\trained_models\ppo\skelefactor_walk_good_bio_positive_enforcement_7fact.pt")
+    # # print(data)
+    # actor_critic.load_state_dict(data[0].state_dict())
     actor_critic.to(device)
 
     if args.algo == 'a2c':
@@ -301,7 +306,7 @@ def main():
     obs = envs.reset()
     ob_shape = obs.shape
     rollouts = RolloutStorage(args.num_steps, args.num_processes,
-                              ob_shape, envs.action_space,
+                              ob_shape, envs.action_space, (7), (1),
                               actor_critic.recurrent_hidden_state_size)
     print(args.num_processes)
     print(envs.observation_space.shape)
@@ -314,12 +319,20 @@ def main():
     ep_reward = 0
     import tqdm
     start = time.time()
-
+    print(args)
+    print(int(args.num_frames) // args.num_steps // args.num_processes)
+    print('NUM', num_updates)
+    timestep = 0
+    ep_ends = []
     for j in range(num_updates):
+        if j == 25:
+            print("UPDATING SYNERGY")
+            actor_critic.adjust_synergy(0.8)
         for step in tqdm.tqdm(range(args.num_steps)):
             # Sample actions
+            timestep += 1
             with torch.no_grad():
-                value, action, action_log_prob, recurrent_hidden_states = actor_critic.act(
+                value, action, synergy,q, action_log_prob, recurrent_hidden_states = actor_critic.act(
                     rollouts.obs[step],
                     rollouts.recurrent_hidden_states[step],
                     rollouts.masks[step])
@@ -337,8 +350,10 @@ def main():
             if done[0]:
                 obs = envs.reset()
                 episode_rewards.append(ep_reward)
+                ep_ends.append(timestep)
                 ep_reward = 0
-            rollouts.insert(obs, recurrent_hidden_states, action, action_log_prob, value, reward, masks)
+            # print(action)
+            rollouts.insert(obs, recurrent_hidden_states, action, synergy,q, action_log_prob, value, reward, masks)
 
         with torch.no_grad():
             next_value = actor_critic.get_value(rollouts.obs[-1],
@@ -371,7 +386,7 @@ def main():
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
         print("update time", print(len(episode_rewards)))
-        if True and len(episode_rewards) >= 10:
+        if True:
             end = time.time()
             print(
                 "Updates {}, num timesteps {}, FPS {} \n Last {} training episodes: mean/median reward {:.5f}/{:.5f}, min/max reward {:.5f}/{:.5f}\n".
@@ -385,17 +400,20 @@ def main():
                        value_loss, action_loss))
 
             import time
-            xdata = np.convolve(episode_rewards, np.ones(10) / 10, mode='valid')
-            line1.set_xdata(np.arange(0, len(xdata)))
-            line1.set_ydata(xdata)
-            ax.set_xlim(0, len(xdata))
-            ax.set_ylim(min(xdata), max(xdata))
+            ydata = np.convolve(episode_rewards, np.ones(10) / 10, mode='valid')
+            line1.set_xdata(np.arange(0, len(ydata)))
+            line1.set_ydata(ydata)
+            ax.set_xlim(0, len(ydata))
+            ax.set_ylim(min(ydata), max(ydata))
             fig.canvas.draw()
             fig.canvas.flush_events()
             time.sleep(0.01)
             # save the returns
-            ret_path = 'returns/' + args.env_name + str(time.time()) + '.npy'
-            np.save(ret_path, np.array(np.array(xdata)))
+            xdata = np.array(ep_ends)
+            ret_path = 'returns_staging/' + args.env_name + '_' + str(args.seed) +'.npy'
+            ep_path = 'returns_staging/' + "x_data-" + args.env_name + '_' + str(args.seed) + '.npy'
+            np.save(ret_path, np.array(np.array(episode_rewards)))
+            np.save(ep_path, ep_ends)
             # plt.plot(range(len(episode_rewards)), episode_rewards)
 
         if (args.eval_interval is not None
@@ -417,33 +435,33 @@ def main():
                                                        actor_critic.recurrent_hidden_state_size, device=device)
             eval_masks = torch.zeros(args.num_processes, 1, device=device)
 
-            while len(eval_episode_rewards) < 10:
-                with torch.no_grad():
-                    _, action, _, eval_recurrent_hidden_states = actor_critic.act(
-                        obs, eval_recurrent_hidden_states, eval_masks, deterministic=True)
+            # while len(eval_episode_rewards) < 10:
+            #     with torch.no_grad():
+            #         _, action, _, eval_recurrent_hidden_states = actor_critic.act(
+            #             obs, eval_recurrent_hidden_states, eval_masks, deterministic=True)
+            #
+            #     # Obser reward and next obs
+            #     obs, reward, done, infos = eval_envs.step(action)
+            #
+            #     eval_masks = torch.FloatTensor([[0.0] if done_ else [1.0]
+            #                                     for done_ in done])
+            #     for info in infos:
+            #         if 'episode' in info.keys():
+            #             eval_episode_rewards.append(info['episode']['r'])
+            #
+            # eval_envs.close()
+            #
+            # print(" Evaluation using {} episodes: mean reward {:.5f}\n".
+            #       format(len(eval_episode_rewards),
+            #              np.mean(eval_episode_rewards)))
 
-                # Obser reward and next obs
-                obs, reward, done, infos = eval_envs.step(action)
-
-                eval_masks = torch.FloatTensor([[0.0] if done_ else [1.0]
-                                                for done_ in done])
-                for info in infos:
-                    if 'episode' in info.keys():
-                        eval_episode_rewards.append(info['episode']['r'])
-
-            eval_envs.close()
-
-            print(" Evaluation using {} episodes: mean reward {:.5f}\n".
-                  format(len(eval_episode_rewards),
-                         np.mean(eval_episode_rewards)))
-
-        if args.vis and j % args.vis_interval == 0:
-            try:
-                # Sometimes monitor doesn't properly flush the outputs
-                win = visdom_plot(viz, win, args.log_dir, args.env_name,
-                                  args.algo, args.num_frames)
-            except IOError:
-                pass
+        # if args.vis and j % args.vis_interval == 0:
+        #     try:
+        #         # Sometimes monitor doesn't properly flush the outputs
+        #         win = visdom_plot(viz, win, args.log_dir, args.env_name,
+        #                           args.algo, args.num_frames)
+        #     except IOError:
+        #         pass
 
 
 if __name__ == "__main__":

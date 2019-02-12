@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from distributions import Categorical, DiagGaussian
+from distributions import Categorical, DiagGaussian, MonteGaussian
 from utils import init, init_normc_
 
 
@@ -29,6 +29,7 @@ class Policy(nn.Module):
             self.dist = Categorical(self.base.output_size, num_outputs)
         elif action_space.__class__.__name__ == "Box":
             num_outputs = action_space.shape[0]
+            # self.dist = MonteGaussian(self.base.output_size, num_outputs)
             self.dist = DiagGaussian(self.base.output_size, num_outputs)
         else:
             raise NotImplementedError
@@ -47,30 +48,56 @@ class Policy(nn.Module):
 
     def act(self, inputs, rnn_hxs, masks, deterministic=False):
         value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
-        dist = self.dist(actor_features)
+        # dist = self.dist(actor_features)
+        action, synergy,q, action_log_probs = self.dist(actor_features)
+        # print(action)
+        # return value, action, action_log_probs, rnn_hxs
+        # if deterministic:
+        #     action = dist.mode()
+        # else:
+        #     action = dist.sample()
+        #
+        # action_log_probs = dist.log_probs(action)
+        # dist_entropy = dist.entropy().mean()
 
-        if deterministic:
-            action = dist.mode()
+        return value, action, synergy, q, action_log_probs, rnn_hxs
+
+    def adjust_synergy(self, syn=1.0):
+        if 0.0 < syn < 1.0:
+            self.dist.syn_probs = syn
         else:
-            action = dist.sample()
-
-        action_log_probs = dist.log_probs(action)
-        dist_entropy = dist.entropy().mean()
-
-        return value, action, action_log_probs, rnn_hxs
+            print("BAD SYNERGY LEVEL ", syn)
 
     def get_value(self, inputs, rnn_hxs, masks):
         value, _, _ = self.base(inputs, rnn_hxs, masks)
         return value
 
-    def evaluate_actions(self, inputs, rnn_hxs, masks, action):
+    def eval_monte(self, action):
+        pass
+
+    def evaluate_actions(self, inputs, rnn_hxs, masks, action, synergy, q):
+        """
+        Given an action, tell me what the value of this state is and how probably this action is given the inputs
+        :param inputs:
+        :param rnn_hxs:
+        :param masks:
+        :param action:
+        :return:
+        """
         value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
-        dist = self.dist(actor_features)
 
-        action_log_probs = dist.log_probs(action)
-        dist_entropy = dist.entropy().mean()
+        # find the probablity of this action given the new network
+        liklihoods = self.dist.eval_actions(actor_features, action, synergy, q)
 
-        return value, action_log_probs, dist_entropy, rnn_hxs
+        # value, action, liklihoods, rnn_hxs = self.act(inputs, rnn_hxs, masks)
+
+
+        # dist = self.dist(actor_features)
+        #
+        # action_log_probs = dist.log_probs(action)
+        dist_entropy = 0
+
+        return value, liklihoods, dist_entropy, rnn_hxs
 
 
 class NNBase(nn.Module):
@@ -207,7 +234,6 @@ class MLPBase(NNBase):
 
         if self.is_recurrent:
             x, rnn_hxs = self._forward_gru(x, rnn_hxs, masks)
-
         hidden_critic = self.critic(x)
         hidden_actor = self.actor(x)
 

@@ -49,14 +49,14 @@ class PPO():
                     advantages, self.num_mini_batch)
 
             for sample in data_generator:
-                obs_batch, recurrent_hidden_states_batch, actions_batch, \
+                obs_batch, recurrent_hidden_states_batch, actions_batch, synergies_batch, qs_batch, \
                    value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, \
                         adv_targ = sample
 
                 # Reshape to do in a single forward pass for all steps
                 values, action_log_probs, dist_entropy, _ = self.actor_critic.evaluate_actions(
                     obs_batch, recurrent_hidden_states_batch,
-                    masks_batch, actions_batch)
+                    masks_batch, actions_batch, synergies_batch, qs_batch)
 
                 ratio = torch.exp(action_log_probs - old_action_log_probs_batch)
                 surr1 = ratio * adv_targ
@@ -80,14 +80,14 @@ class PPO():
                                          self.max_grad_norm)
                 self.optimizer.step()
                 # get the weights in the DIST fc_mean layer and clamp
-                fc_mean_weight = self.actor_critic.state_dict()['dist.fc_mean.weight']
-                fc_mean_weight.clamp_(0)
+                # fc_mean_weight = self.actor_critic.state_dict()['dist.fc_mean.weight']
+                # fc_mean_weight.clamp_(0)
                 # TODO: set as constant
-                fc_mean_weight.masked_fill_(fc_mean_weight == 0, 0.01)
+                # fc_mean_weight.masked_fill_(fc_mean_weight == 0, 0.01)
 
                 value_loss_epoch += value_loss.item()
                 action_loss_epoch += action_loss.item()
-                dist_entropy_epoch += dist_entropy.item()
+                # dist_entropy_epoch += dist_entropy.item()
 
         num_updates = self.ppo_epoch * self.num_mini_batch
 

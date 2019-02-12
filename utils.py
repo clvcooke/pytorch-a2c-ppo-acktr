@@ -54,5 +54,5 @@ def init(module, weight_init, bias_init, gain=1):
 def init_normc_(weight, gain=1):
     weight.normal_(0, 1)
     # TODO: Flag this
-    weight.abs_()
+    # weight.abs_()
     weight *= gain / torch.sqrt(weight.pow(2).sum(1, keepdim=True))
