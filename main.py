@@ -315,9 +315,9 @@ def main():
     timestep = 0
     ep_ends = []
     for j in range(num_updates):
-        if j == 50:
+        if j == 0:
             print("UPDATING SYNERGY")
-            actor_critic.adjust_synergy(0.8)
+            actor_critic.adjust_synergy(0.5)
         for step in tqdm.tqdm(range(args.num_steps)):
             # Sample actions
             timestep += 1
