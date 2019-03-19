@@ -1,9 +1,47 @@
 import torch
 import torch.nn as nn
+import numpy as np
 import torch.nn.functional as F
 
-from distributions import Categorical, DiagGaussian, MonteGaussian
+from distributions import Categorical, DiagGaussian
 from utils import init, init_normc_
+
+MIRROR_FACT = np.array([[0.2, 0.45, 0.6, 0.08, 0.15, -0.2, -0.45, -0.6,
+                         -0.08, -0.15],
+                        [0.2, 0.17, 0.4, 0.2, 0.2, -0.2, -0.17, -0.4,
+                         -0.2, -0.2],
+                        [-0.15, 0.275, 0.2, -0.075, 0.3, 0.15, -0.275, -0.2,
+                         0.075, -0.3],
+                        [-0.3, 0.05, -0.05, -0.1, 0.05, 0.3, -0.05, 0.05,
+                         0.1, -0.05],
+                        [-0.15, 0.3, 0.2, 0.1, -0.05, 0.15, -0.3, -0.2,
+                         -0.1, 0.05],
+                        [-0.1, 0.55, 0.25, 0.1, -0.1, 0.1, -0.55, -0.25,
+                         -0.1, 0.1],
+                        [0.8, -0.15, -0.1, -0.1, -0.25, -0.8, 0.15, 0.1,
+                         0.1, 0.25],
+                        [0.2, 0.1, 0.1, 0.2, 0.4, -0.2, -0.1, -0.1,
+                         -0.2, -0.4],
+                        [-0.25, 0.2, 0.2, 0.2, 0.7, 0.25, -0.2, -0.2,
+                         -0.2, -0.7],
+                        [-0.2, -0.45, -0.6, -0.08, -0.15, 0.2, 0.45, 0.6,
+                         0.08, 0.15],
+                        [-0.2, -0.17, -0.4, -0.2, -0.2, 0.2, 0.17, 0.4,
+                         0.2, 0.2],
+                        [0.15, -0.275, -0.2, 0.075, -0.3, -0.15, 0.275, 0.2,
+                         -0.075, 0.3],
+                        [0.3, -0.05, 0.05, 0.1, -0.05, -0.3, 0.05, -0.05,
+                         -0.1, 0.05],
+                        [0.15, -0.3, -0.2, -0.1, 0.05, -0.15, 0.3, 0.2,
+                         0.1, -0.05],
+                        [0.1, -0.55, -0.25, -0.1, 0.1, -0.1, 0.55, 0.25,
+                         0.1, -0.1],
+                        [-0.8, 0.15, 0.1, 0.1, 0.25, 0.8, -0.15, -0.1,
+                         -0.1, -0.25],
+                        [-0.2, -0.1, -0.1, -0.2, -0.4, 0.2, 0.1, 0.1,
+                         0.2, 0.4],
+                        [0.25, -0.2, -0.2, -0.2, -0.7, -0.25, 0.2, 0.2,
+                         0.2, 0.7]])
 
 
 class Flatten(nn.Module):
@@ -48,8 +86,10 @@ class Policy(nn.Module):
 
     def act(self, inputs, rnn_hxs, masks, deterministic=False):
         value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
+
+
         # dist = self.dist(actor_features)
-        action, synergy,q, action_log_probs = self.dist(actor_features)
+        action, synergy, q, action_log_probs = self.dist(actor_features)
         # print(action)
         # return value, action, action_log_probs, rnn_hxs
         # if deterministic:
@@ -63,7 +103,7 @@ class Policy(nn.Module):
         return value, action, synergy, q, action_log_probs, rnn_hxs
 
     def adjust_synergy(self, syn=1.0):
-        if 0.0 < syn < 1.0:
+        if 0.0 <= syn <= 1.0:
             self.dist.syn_probs = syn
         else:
             print("BAD SYNERGY LEVEL ", syn)
@@ -90,7 +130,6 @@ class Policy(nn.Module):
         liklihoods = self.dist.eval_actions(actor_features, action, synergy, q)
 
         # value, action, liklihoods, rnn_hxs = self.act(inputs, rnn_hxs, masks)
-
 
         # dist = self.dist(actor_features)
         #
@@ -127,8 +166,9 @@ class NNBase(nn.Module):
 
     @property
     def output_size(self):
-        # return self._hidden_size
-        return 7
+        return self._hidden_size
+        # return 10
+        # return 7
 
     def _forward_gru(self, x, hxs, masks):
         if x.size(0) == hxs.size(0):
@@ -163,9 +203,9 @@ class CNNBase(NNBase):
         super(CNNBase, self).__init__(recurrent, hidden_size, hidden_size)
 
         init_ = lambda m: init(m,
-            nn.init.orthogonal_,
-            lambda x: nn.init.constant_(x, 0),
-            nn.init.calculate_gain('relu'))
+                               nn.init.orthogonal_,
+                               lambda x: nn.init.constant_(x, 0),
+                               nn.init.calculate_gain('relu'))
 
         self.main = nn.Sequential(
             init_(nn.Conv2d(num_inputs, 32, 8, stride=4)),
@@ -180,8 +220,8 @@ class CNNBase(NNBase):
         )
 
         init_ = lambda m: init(m,
-            nn.init.orthogonal_,
-            lambda x: nn.init.constant_(x, 0))
+                               nn.init.orthogonal_,
+                               lambda x: nn.init.constant_(x, 0))
 
         self.critic_linear = init_(nn.Linear(hidden_size, 1))
 
@@ -204,8 +244,8 @@ class MLPBase(NNBase):
             num_inputs = hidden_size
 
         init_ = lambda m: init(m,
-            init_normc_,
-            lambda x: nn.init.constant_(x, 0))
+                               init_normc_,
+                               lambda x: nn.init.constant_(x, 0))
 
         self.actor = nn.Sequential(
             init_(nn.Linear(num_inputs, hidden_size)),
@@ -213,9 +253,10 @@ class MLPBase(NNBase):
             # nn.Dropout(0.2),
             init_(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
-            # nn.Dropout(0.2),
-            init_(nn.Linear(hidden_size, 7, bias=False)),
-            nn.Sigmoid()
+            # # nn.Dropout(0.2),
+            # init_(nn.Linear(hidden_size, self.output_size, bias=False)),
+            # # init_(nn.Linear(hidden_size, 10)),
+            # nn.Tanh()
         )
 
         self.critic = nn.Sequential(

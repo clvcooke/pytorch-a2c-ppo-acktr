@@ -100,13 +100,16 @@ venv.bak/
 # mkdocs documentation
 /site
 
+python_*/
+imgs/
 trained_models/
 .fuse_hidden*
 
-*.png
 
 *.npy
 
 *.json
 
 \.idea/
+
+python_1\.png

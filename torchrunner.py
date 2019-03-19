@@ -1,12 +1,42 @@
 from osim.env import L2RunEnv
-import  numpy as np
+import numpy as np
 import json
 import torch
 
+HEIGHT_WEIGHT = 1.25
+JOINT_WEIGHT = -0.0714
+ACTIVATION_WEIGHT = -2.0
+FORCE_NORM = 1 / 74430
+JOINT_MUL = {
+    'knee': 1.5,
+    'hip': 2.0,
+    'back': 1.0,
+    'ankle': 3.0
+}
+
+JOINT_MAX = {
+    'knee': 0,
+    'hip': 0.087,
+    'ankle': 0.26,
+    'back': 0.174
+}
+
+JOINT_MIN = {
+    'knee': -1.13,
+    'hip': -0.698,
+    'ankle': -0.52,
+    'back': -0.174
+}
+
+ANKLE_MUL = 3.0
+KNEE_MUL = 1.5
+HIP_MUL = 2.0
+TRUNK_MUL = 1.0
+
 
 class TorchRunner(L2RunEnv):
-    def __init__(self, visualize=True, acc=0.03):
-        super(TorchRunner, self).__init__(False, acc)
+    def __init__(self, acc=0.03):
+        super(TorchRunner, self).__init__(True, acc)
         self.internal_time = 0.0
         self.cycle = 0.0
         self.joints = ['LHF',
@@ -28,9 +58,11 @@ class TorchRunner(L2RunEnv):
     def reset(self, project=True):
         obs = super(TorchRunner, self).reset()
         self.internal_time = 0.0
+        obs = self.process_observation(obs)
         return torch.from_numpy(np.array(obs))
 
-    def gen_penalty(self, pos, min_val, max_val, multiplier=0.01):
+    @staticmethod
+    def gen_penalty(pos, min_val, max_val, multiplier=0.01):
         assert len(pos) == 1
         pos = pos[0]
         if min_val <= pos <= max_val:
@@ -58,120 +90,51 @@ class TorchRunner(L2RunEnv):
 
         return ground_state
 
-    def calculate_cycle(self):
-        self.internal_time += 1.0 / 100
-        if self.internal_time < 4.63:
-            self.cycle = self.internal_time / 4.63
-        else:
-            self.cycle = (self.internal_time - 4.63) / 1.96 % 1
-
-    def get_goal_angles(self):
-        goal_angs = {'trunk': 0.0}
-        if self.internal_time < 4.63:
-            idx = int(self.internal_time * 100)
-        else:
-            idx = int(((self.internal_time - 4.63) % 1.96) * 100) + int(4.63 * 100)
-        for joint in self.joints:
-            goal_angs[joint] = self.joint_data[joint][idx]
-        return goal_angs
+    @staticmethod
+    def process_observation(obs):
+        return obs[0:32]
 
     def step(self, action, project=True):
         action = action.squeeze().cpu().numpy()
-        total_reward = 0
-        for i in range(1):
-            self.calculate_cycle()
+        obs, reward, done, info = super(TorchRunner, self).step(action)
+        obs = self.process_observation(obs)
+        joint_pos = self.osim_model.state_desc['joint_pos']
+        body_pos = self.osim_model.state_desc['body_pos']
+        muscles = self.osim_model.state_desc['muscles']
 
-            obs, reward, done, info = super(TorchRunner, self).step(action)
+        # r_h
+        pelvis_height = body_pos['pelvis'][1]
+        height_reward = min(0.8, pelvis_height)
 
-            GOAL_STATE = 'terminal_stance'
+        # r_j
+        joint_punishment = 0
+        for joint in ['hip', 'knee', 'ankle']:
+            for side in ['l', 'r']:
+                jn = joint
+                joint_punishment += self.gen_penalty(
+                    joint_pos[jn + '_' + side],
+                    JOINT_MIN[jn],
+                    JOINT_MAX[jn],
+                    JOINT_MUL[jn]
+                )
+        joint_punishment += self.gen_penalty(
+            joint_pos['back'],
+            JOINT_MIN['back'],
+            JOINT_MAX['back'],
+            JOINT_MUL['back']
+        )
 
-            # lets check if the joints are within their range
-            joint_pos = self.osim_model.state_desc['joint_pos']
-            joint_vel = self.osim_model.state_desc['joint_vel']
-            joint_acc = self.osim_model.state_desc['joint_acc']
-            body_pos = self.osim_model.state_desc['body_pos']
-            muscles = self.osim_model.state_desc['muscles']
-            #
-            # pose_reward = 0
-            # # rewarding progress towards goal state (fixed for now to be terminal stance):
-            # ground_state = self.get_ground_state(body_pos)
-            #
-            # # heels and toes
-            # if not ground_state['toes_l']:
-            #     pose_reward += 1
-            # if ground_state['toes_r']:
-            #     pose_reward += 1
-            # if ground_state['calcn_l']:
-            #     pose_reward += 1
-            # if not ground_state['calcn_r']:
-            #     pose_reward += 1
-            #
-            # r = self.gen_penalty(joint_pos['knee_r'], -0.1, 0.1, 1)
-            # pose_reward += 1 - r
-            #
-            # r = self.gen_penalty(joint_pos['knee_l'], -0.1, 0.1, 1)
-            # pose_reward += 1 - r
-            #
-            # r = self.gen_penalty(joint_pos['hip_r'], -0.3, -0.2, 1)
-            # pose_reward += 1 - r
-            #
-            # r = self.gen_penalty(joint_pos['hip_l'], 0.2, 0.3, 1)
-            # pose_reward += 1 - r
-            #
-            # pose_reward = pose_reward/10
-            # print("POSE REWARD IS: ", pose_reward)
+        # r_a
+        activation_punishment = 0
+        # muscles is a dict: https://gist.github.com/clvcooke/d8389724c4e107233d3e6e5fba67aefc
+        for muscle in muscles.values():
+            activation_punishment += muscle['fiber_force']
+        activation_punishment *= FORCE_NORM
 
-            joint_punishment = 0
-            ankle_min = -0.52
-            ankle_max = 0.26
-            knee_max = 0.174
-            knee_max = 0
-            knee_min = -1.13
-            hip_max = 0.087
-            hip_min = -0.698
-            trunk_min = -0.087
-            trunk_max = 0.087
+        total_reward = height_reward * HEIGHT_WEIGHT + joint_punishment * JOINT_WEIGHT \
+                       + activation_punishment * ACTIVATION_WEIGHT
 
-            goal_angles = self.get_goal_angles()
-            for joint_name, joint_value in goal_angles.items():
-                # print(joint_name)
-                try:
-                    joint_value = joint_value[0]
-                except TypeError:
-                    pass
-                # print(joint_value)
-                joint_punishment += self.gen_penalty(joint_pos[self.sim_joints_map[joint_name]],
-                                                     joint_value, joint_value)
-
-            # joint_punishment += self.gen_penalty(joint_pos['ankle_r'], ankle_min, ankle_max)
-            # joint_punishment += self.gen_penalty(joint_pos['ankle_l'], ankle_min, ankle_max)
-
-            joint_punishment += self.gen_penalty(joint_pos['knee_l'], knee_min, knee_max, multiplier=0.001)
-            joint_punishment += self.gen_penalty(joint_pos['knee_r'], knee_min, knee_max, multiplier=0.001)
-
-            # joint_punishment += self.gen_penalty(joint_pos['hip_r'], hip_min, hip_max)
-            # joint_punishment += self.gen_penalty(joint_pos['hip_l'], hip_min, hip_max)
-            #
-            # joint_punishment += self.gen_penalty(joint_pos['ground_pelvis'][0:1], trunk_min, trunk_max, multiplier=0.1)
-            # joint_punishment = 0
-            # print("GP: ", joints['ground_pelvis'])
-            pelvis_height = min(0.8, body_pos['pelvis'][1])
-
-            activation_punishment = 0
-            for muscle_names, muscle in muscles.items():
-                activation_punishment += muscle['activation'] / (180 * 8)
-
-            # print("pelvis", pelvis_height)
-
-            # print("Joint Punishment is: ", joint_punishment)
-            # reward *= 10
-            reward = -activation_punishment
-            # print("Fwd reward is: ", reward)
-            reward += pelvis_height / 10
-            # print("non-punished reward is: ", reward)
-            reward = reward - joint_punishment
-            # print("Total", reward)
-            total_reward += reward
-
+        total_reward = height_reward * HEIGHT_WEIGHT
+        total_reward = -1 + total_reward*0.001
         return torch.from_numpy(np.expand_dims(np.array(obs), 0)), torch.from_numpy(
             np.expand_dims(np.array(total_reward), 0)), [done], [info]
