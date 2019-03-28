@@ -36,7 +36,7 @@ TRUNK_MUL = 1.0
 
 class TorchRunner(L2RunEnv):
     def __init__(self, acc=0.03):
-        super(TorchRunner, self).__init__(True, acc)
+        super(TorchRunner, self).__init__(False, acc)
         self.internal_time = 0.0
         self.cycle = 0.0
         self.joints = ['LHF',
