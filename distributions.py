@@ -139,7 +139,7 @@ class DiagGaussian(nn.Module):
             action = actions[i:i + 1]
             syn = syns[i:i + 1]
             log_probs_q = q_dist.log_prob(q)
-            # log_probs[i] = log_probs_q
+            log_probs[i] = log_probs_q
             log_probs[i] = 0
             if q == 0:
                 action_mean = self.fc_mean(x)

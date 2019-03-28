@@ -96,45 +96,50 @@ class TorchRunner(L2RunEnv):
 
     def step(self, action, project=True):
         action = action.squeeze().cpu().numpy()
-        obs, reward, done, info = super(TorchRunner, self).step(action)
-        obs = self.process_observation(obs)
-        joint_pos = self.osim_model.state_desc['joint_pos']
-        body_pos = self.osim_model.state_desc['body_pos']
-        muscles = self.osim_model.state_desc['muscles']
+        action = (np.tanh(action) + 1)/2
+        total_reward = 0
+        for i in range(4):
+            obs, reward, done, info = super(TorchRunner, self).step(action)
+            obs = self.process_observation(obs)
+            joint_pos = self.osim_model.state_desc['joint_pos']
+            body_pos = self.osim_model.state_desc['body_pos']
+            muscles = self.osim_model.state_desc['muscles']
 
-        # r_h
-        pelvis_height = body_pos['pelvis'][1]
-        height_reward = min(0.8, pelvis_height)
+            # r_h
+            pelvis_height = body_pos['pelvis'][1]
+            height_reward = min(0.8, pelvis_height)
+            # height_reward = pelvis_height
 
-        # r_j
-        joint_punishment = 0
-        for joint in ['hip', 'knee', 'ankle']:
-            for side in ['l', 'r']:
-                jn = joint
-                joint_punishment += self.gen_penalty(
-                    joint_pos[jn + '_' + side],
-                    JOINT_MIN[jn],
-                    JOINT_MAX[jn],
-                    JOINT_MUL[jn]
-                )
-        joint_punishment += self.gen_penalty(
-            joint_pos['back'],
-            JOINT_MIN['back'],
-            JOINT_MAX['back'],
-            JOINT_MUL['back']
-        )
+            # r_j
+            joint_punishment = 0
+            for joint in ['hip', 'knee', 'ankle']:
+                for side in ['l', 'r']:
+                    jn = joint
+                    joint_punishment += self.gen_penalty(
+                        joint_pos[jn + '_' + side],
+                        JOINT_MIN[jn],
+                        JOINT_MAX[jn],
+                        JOINT_MUL[jn]
+                    )
+            joint_punishment += self.gen_penalty(
+                joint_pos['back'],
+                JOINT_MIN['back'],
+                JOINT_MAX['back'],
+                JOINT_MUL['back']
+            )
 
-        # r_a
-        activation_punishment = 0
-        # muscles is a dict: https://gist.github.com/clvcooke/d8389724c4e107233d3e6e5fba67aefc
-        for muscle in muscles.values():
-            activation_punishment += muscle['fiber_force']
-        activation_punishment *= FORCE_NORM
+            # r_a
+            activation_punishment = 0
+            # muscles is a dict: https://gist.github.com/clvcooke/d8389724c4e107233d3e6e5fba67aefc
+            for muscle in muscles.values():
+                activation_punishment += muscle['fiber_force']
+            activation_punishment *= FORCE_NORM
 
-        total_reward = height_reward * HEIGHT_WEIGHT + joint_punishment * JOINT_WEIGHT \
-                       + activation_punishment * ACTIVATION_WEIGHT
-
-        total_reward = height_reward * HEIGHT_WEIGHT
-        total_reward = -1 + total_reward*0.001
+            # total_reward = height_reward * HEIGHT_WEIGHT + joint_punishment * JOINT_WEIGHT \
+            #                + activation_punishment * ACTIVATION_WEIGHT
+            total_reward += joint_punishment*JOINT_WEIGHT
+            total_reward += height_reward * HEIGHT_WEIGHT
+        # total_reward += joint_punishment*JOINT_WEIGHT
+        # total_reward = -activation_punishment
         return torch.from_numpy(np.expand_dims(np.array(obs), 0)), torch.from_numpy(
             np.expand_dims(np.array(total_reward), 0)), [done], [info]
