@@ -137,8 +137,9 @@ class TorchRunner(L2RunEnv):
 
             # total_reward = height_reward * HEIGHT_WEIGHT + joint_punishment * JOINT_WEIGHT \
             #                + activation_punishment * ACTIVATION_WEIGHT
-            total_reward += joint_punishment*JOINT_WEIGHT
-            total_reward += height_reward * HEIGHT_WEIGHT
+            # total_reward += joint_punishment*JOINT_WEIGHT
+            total_reward += np.exp(height_reward) - 1
+            # total_reward += height_reward * HEIGHT_WEIGHT
         # total_reward += joint_punishment*JOINT_WEIGHT
         # total_reward = -activation_punishment
         return torch.from_numpy(np.expand_dims(np.array(obs), 0)), torch.from_numpy(
