@@ -52,8 +52,6 @@ class TorchRunner(L2RunEnv):
                                'RHF': 'hip_r',
                                'RKF': 'knee_r',
                                "RAP": 'ankle_r'}
-        with open('movement_data.json') as fp:
-            self.joint_data = json.load(fp)
 
     def reset(self, project=True):
         obs = super(TorchRunner, self).reset()
