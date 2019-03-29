@@ -92,9 +92,13 @@ class TorchRunner(L2RunEnv):
     def process_observation(obs):
         return obs[0:32]
 
+    @staticmethod
+    def sigmoid(x):
+        return 1/(1 + np.exp(-x))
+
     def step(self, action, project=True):
         action = action.squeeze().cpu().numpy()
-        action = (np.tanh(action) + 1)/2
+        action = TorchRunner.sigmoid(action)
         total_reward = 0
         for i in range(1):
             obs, reward, done, info = super(TorchRunner, self).step(action)

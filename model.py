@@ -253,6 +253,8 @@ class MLPBase(NNBase):
             # nn.Dropout(0.2),
             init_(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
+            init_(nn.Linear(hidden_size, hidden_size)),
+            nn.Tanh()
             # # nn.Dropout(0.2),
             # init_(nn.Linear(hidden_size, self.output_size, bias=False)),
             # # init_(nn.Linear(hidden_size, 10)),
