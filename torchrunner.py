@@ -96,7 +96,7 @@ class TorchRunner(L2RunEnv):
         action = action.squeeze().cpu().numpy()
         action = (np.tanh(action) + 1)/2
         total_reward = 0
-        for i in range(4):
+        for i in range(1):
             obs, reward, done, info = super(TorchRunner, self).step(action)
             obs = self.process_observation(obs)
             joint_pos = self.osim_model.state_desc['joint_pos']
@@ -106,7 +106,6 @@ class TorchRunner(L2RunEnv):
             # r_h
             pelvis_height = body_pos['pelvis'][1]
             height_reward = min(0.8, pelvis_height)
-            # height_reward = pelvis_height
 
             # r_j
             joint_punishment = 0
