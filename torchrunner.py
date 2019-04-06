@@ -90,6 +90,7 @@ class TorchRunner(L2RunEnv):
 
     @staticmethod
     def process_observation(obs):
+        # return obs[0:32]
         return obs[0:32]
 
     @staticmethod
@@ -135,11 +136,12 @@ class TorchRunner(L2RunEnv):
             for muscle in muscles.values():
                 activation_punishment += muscle['fiber_force']
             activation_punishment *= FORCE_NORM
-
+            height_reward = np.exp(height_reward) - 1
             # total_reward = height_reward * HEIGHT_WEIGHT + joint_punishment * JOINT_WEIGHT \
             #                + activation_punishment * ACTIVATION_WEIGHT
+            total_reward = height_reward * HEIGHT_WEIGHT #  + joint_punishment*JOINT_WEIGHT
             # total_reward += joint_punishment*JOINT_WEIGHT
-            total_reward += np.exp(height_reward) - 1
+            # total_reward += (np.exp(height_reward) - 1)
             # total_reward += height_reward * HEIGHT_WEIGHT
         # total_reward += joint_punishment*JOINT_WEIGHT
         # total_reward = -activation_punishment

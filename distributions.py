@@ -104,7 +104,7 @@ class DiagGaussian(nn.Module):
         self.fc_mean = init_(nn.Linear(num_inputs, num_outputs, bias=True))
         # self.fc_mean.weight.data = torch.from_numpy(MIRROR_FACT).float()
         self.logstd = AddBias(torch.zeros(num_outputs))
-        self.synlogstd = AddBias(torch.zeros(num_inputs))
+        self.synlogstd = AddBias(torch.ones(num_inputs)*0)
         self.opto_probs = AddBias(torch.ones(1) * 0.01)
         self.syn_probs = 1.0
         # self.opto_probs = nn.Parameter(data=torch.ones(1) * 0.5, requires_grad=True).cuda()

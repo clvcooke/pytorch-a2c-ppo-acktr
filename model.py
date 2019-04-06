@@ -146,6 +146,7 @@ class NNBase(nn.Module):
 
         self._hidden_size = hidden_size
         self._recurrent = recurrent
+        self.syn_size = 7
 
         if recurrent:
             self.gru = nn.GRUCell(recurrent_input_size, hidden_size)
@@ -166,7 +167,7 @@ class NNBase(nn.Module):
 
     @property
     def output_size(self):
-        return self._hidden_size
+        return self.syn_size
         # return 10
         # return 7
 
@@ -197,45 +198,6 @@ class NNBase(nn.Module):
 
         return x, hxs
 
-
-class CNNBase(NNBase):
-    def __init__(self, num_inputs, recurrent=False, hidden_size=512):
-        super(CNNBase, self).__init__(recurrent, hidden_size, hidden_size)
-
-        init_ = lambda m: init(m,
-                               nn.init.orthogonal_,
-                               lambda x: nn.init.constant_(x, 0),
-                               nn.init.calculate_gain('relu'))
-
-        self.main = nn.Sequential(
-            init_(nn.Conv2d(num_inputs, 32, 8, stride=4)),
-            nn.ReLU(),
-            init_(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            init_(nn.Conv2d(64, 32, 3, stride=1)),
-            nn.ReLU(),
-            Flatten(),
-            init_(nn.Linear(32 * 7 * 7, hidden_size)),
-            nn.ReLU()
-        )
-
-        init_ = lambda m: init(m,
-                               nn.init.orthogonal_,
-                               lambda x: nn.init.constant_(x, 0))
-
-        self.critic_linear = init_(nn.Linear(hidden_size, 1))
-
-        self.train()
-
-    def forward(self, inputs, rnn_hxs, masks):
-        x = self.main(inputs / 255.0)
-
-        if self.is_recurrent:
-            x, rnn_hxs = self._forward_gru(x, rnn_hxs, masks)
-
-        return self.critic_linear(x), x, rnn_hxs
-
-
 class MLPBase(NNBase):
     def __init__(self, num_inputs, recurrent=False, hidden_size=64):
         super(MLPBase, self).__init__(recurrent, num_inputs, hidden_size)
@@ -253,7 +215,7 @@ class MLPBase(NNBase):
             # nn.Dropout(0.2),
             init_(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
-            init_(nn.Linear(hidden_size, hidden_size)),
+            init_(nn.Linear(hidden_size, self.syn_size)),
             nn.Tanh()
             # # nn.Dropout(0.2),
             # init_(nn.Linear(hidden_size, self.output_size, bias=False)),
@@ -263,6 +225,8 @@ class MLPBase(NNBase):
 
         self.critic = nn.Sequential(
             init_(nn.Linear(num_inputs, hidden_size)),
+            nn.Tanh(),
+            init_(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
             init_(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh()
